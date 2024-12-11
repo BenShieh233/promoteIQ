@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plot_chart import plot_piechart, plot_percentage_histogram
 
 # Streamlit 应用标题
 st.set_page_config(page_title="广告趋势分析", layout="wide")
@@ -11,7 +12,7 @@ st.title("广告趋势分析面板")
 uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
 # 定义页面选项
-pages = ["数据预览", "趋势分析", "百分比分布", "趋势"]
+pages = ["数据预览", "趋势分析", "百分比分布"]
 selected_page = st.sidebar.selectbox("选择页面", pages)
 
 # 上传文件后继续执行
@@ -56,9 +57,10 @@ if uploaded_file:
         # 显示日期范围
         date_range = (df['DATE'].min(), df['DATE'].max())
         st.write(f"**时间范围:** {date_range[0]} 至 {date_range[1]}")
+        st.divider()  # 添加分隔线  
 
         # 各参数的最大、最小和平均值
-        st.write("### 参数统计值")
+        st.write("##### 参数统计值")
         numeric_columns = ['TOTAL SALES', 'IMPRESSIONS', 'CLICKS', 'SPEND', 'CPC', 'CPM', 'CTR', 'ROAS']
         available_columns = [col for col in numeric_columns if col in df.columns]
 
@@ -69,16 +71,21 @@ if uploaded_file:
             stats.loc['ROAS', '平均值'] = df['ROAS'].mean() if 'ROAS' in df.columns else 'N/A'
             st.dataframe(stats.style.format("{:.2f}"))
 
+        st.divider()  # 添加分隔线
+
         # Section 3: 数据分布图表
-        st.write("## 数据分布图表")
+        st.write("### 数据分布图表")
         selected_param = st.selectbox("选择参数查看分布", options=available_columns, index=0)
         if selected_param:
             fig_hist = px.histogram(df, x=selected_param, title=f"{selected_param} 的分布", template='plotly_white')
             st.plotly_chart(fig_hist, use_container_width=True)
 
         # Section 4: 各 CAMPAIGN ID 的参数总览
-        st.write("## 各 CAMPAIGN ID 的参数总览")
+        st.write("##### 各 CAMPAIGN ID 的参数总览")
         aggregation = st.selectbox("选择统计字段", options=available_columns, index=0)
+
+        st.divider()  # 添加分隔线
+
         if aggregation:
             # 聚合方式选择
             if aggregation in ['CTR', 'ROAS']:
@@ -90,21 +97,25 @@ if uploaded_file:
             campaign_summary['CAMPAIGN ID'] = campaign_summary['CAMPAIGN ID'].astype(str)
             numeric_columns = campaign_summary.select_dtypes(include=['float64', 'int64']).columns
             numeric_columns = [col for col in numeric_columns if col != 'CAMPAIGN ID']
-            campaign_summary[numeric_columns] = campaign_summary[numeric_columns].applymap(lambda x: f"{x:.2f}")
+            campaign_summary[numeric_columns] = campaign_summary[numeric_columns].map(lambda x: f"{x:.2f}")
             st.dataframe(campaign_summary)
 
+        st.divider()  # 添加分隔线
+
         # Section 5: 各 CAMPAIGN ID 的排名
-        st.write("## 各 CAMPAIGN ID 的排名（平均值）")
         ranked_campaigns = df.groupby('CAMPAIGN ID')[available_columns].mean()
         ranked_campaigns = ranked_campaigns.sort_values(by=aggregation, ascending=False).reset_index()
         ranked_campaigns['CAMPAIGN ID'] = ranked_campaigns['CAMPAIGN ID'].astype(str)
         numeric_columns = ranked_campaigns.select_dtypes(include=['float64', 'int64']).columns
-        ranked_campaigns[numeric_columns] = ranked_campaigns[numeric_columns].applymap(lambda x: f"{x:.2f}")
-        st.dataframe(ranked_campaigns)
+        for col in numeric_columns:
+            ranked_campaigns[col] = pd.to_numeric(ranked_campaigns[col], errors='coerce')
+        ranked_campaigns[numeric_columns] = ranked_campaigns[numeric_columns].map(lambda x: round(x, 2) if pd.notna(x) else x)
+        ranked_campaigns[numeric_columns] = ranked_campaigns[numeric_columns].round(2)  # 修改底层数据为两位小数
 
-
-
-
+        # 应用样式
+        st.write("##### 各 CAMPAIGN ID 参数平均值概览")
+        styled_ranked_campaigns = ranked_campaigns.style.format(precision=2).background_gradient(cmap="coolwarm", subset=numeric_columns)
+        st.dataframe(styled_ranked_campaigns)
 
     elif selected_page == "趋势分析" and available_columns:
         st.subheader("趋势分析")
@@ -290,17 +301,129 @@ if uploaded_file:
 
         # 创建百分比饼图
         top_n_campaigns = specific_date_summary.head(top_n)
-        others = specific_date_summary.iloc[top_n:].sum()
-        percentage_data = top_n_campaigns._append(pd.Series({'Others': others}))
-        percentage_data = percentage_data / percentage_data.sum() * 100
+        top_campaigns = top_n_campaigns.index.tolist()
+        other_campaigns = specific_date_summary[~specific_date_summary.isin(top_campaigns)].index.tolist()
+        
 
-        fig_pie = px.pie(
-            names=percentage_data.index,
-            values=percentage_data.values,
-            title=f"{aggregation_field} 在 {selected_date} 的百分比分布分析",
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        combine_others = st.checkbox("将其余 Campaign ID 归类为 Others", value=True)
 
+        # 计算图表数量
+        num_columns = len(numeric_columns)
+        fig_aggregation_field = plot_piechart(specific_date_data,
+                                                    "CAMPAIGN ID",
+                                                    str(selected_date),
+                                                    top_campaigns,
+                                                    other_campaigns,
+                                                    aggregation_field,
+                                                    combine_others)
+
+        # 使用 st.columns 创建布局
+        # 第一行必须有两个图表
+        cols = st.columns(2)
+        with cols[0]:
+            st.plotly_chart(fig_aggregation_field)  # 用户指定的图表
+
+        # 第一行第二个位置依次填充剩余的图表
+        with cols[1]:
+            if len(numeric_columns) > 1:  # 检查是否有其他图表
+                first_other_column = numeric_columns[1]
+                if first_other_column in ['CTR', 'ROAS']:
+                    fig = plot_percentage_histogram(
+                        data=specific_date_data,
+                        column_to_aggregate='CAMPAIGN ID',
+                        selected_date=str(selected_date),
+                        top_campaigns=top_campaigns,
+                        aggregation_column=first_other_column
+                    )
+                else:
+                    fig = plot_piechart(
+                        data=specific_date_data, 
+                        column_to_aggregate='CAMPAIGN ID',
+                        selected_date=str(selected_date), 
+                        top_campaigns=top_campaigns, 
+                        other_campaigns=other_campaigns, 
+                        aggregation_column=first_other_column,
+                        combine_others=combine_others
+                    )
+                st.plotly_chart(fig)
+            else:
+                st.write("")  # 空白占位图表
+
+        # 计算剩余的列
+        remaining_columns = [col for col in numeric_columns if col != aggregation_field and col != first_other_column]
+        num_remaining_columns = len(remaining_columns)
+
+        # 创建后续图表布局，每行两个图表
+        for i in range(0, num_remaining_columns, 2):
+            cols = st.columns(2)
+            with cols[0]:
+                if remaining_columns[i] in ['CTR', 'ROAS']:
+                    fig = plot_percentage_histogram(
+                        data=specific_date_data, 
+                        column_to_aggregate='CAMPAIGN ID',
+                        selected_date=str(selected_date), 
+                        top_campaigns=top_campaigns, 
+                        aggregation_column=remaining_columns[i]
+                    )
+                else:
+                    fig = plot_piechart(
+                        data=specific_date_data, 
+                        column_to_aggregate='CAMPAIGN ID',
+                        selected_date=str(selected_date), 
+                        top_campaigns=top_campaigns, 
+                        other_campaigns=other_campaigns, 
+                        aggregation_column=remaining_columns[i],
+                        combine_others=combine_others
+                    )
+                st.plotly_chart(fig)
+            if i + 1 < num_remaining_columns:  # 如果第二个图表存在
+                with cols[1]:
+                    if remaining_columns[i+1] in ['CTR', 'ROAS']:
+                        fig = plot_percentage_histogram(
+                            data=specific_date_data, 
+                            column_to_aggregate='CAMPAIGN ID',
+                            selected_date=str(selected_date), 
+                            top_campaigns=top_campaigns, 
+                            aggregation_column=remaining_columns[i+1]
+                        )
+                    else:
+                        fig = plot_piechart(
+                            data=specific_date_data, 
+                            column_to_aggregate='CAMPAIGN ID',
+                            selected_date=str(selected_date), 
+                            top_campaigns=top_campaigns, 
+                            other_campaigns=other_campaigns, 
+                            aggregation_column=remaining_columns[i+1],
+                            combine_others = combine_others
+                        )
+                    st.plotly_chart(fig)
+            else:  # 如果没有第二个图表，空白占位
+                with cols[1]:
+                    st.write("")  # 空白占位图表
+
+        # 如果最后剩下一个图表，单独占一行并居中
+        if num_remaining_columns % 2 != 0:
+            cols = st.columns(1)
+            with cols[0]:
+                if remaining_columns[-1] in ['CTR', 'ROAS']:
+                    fig = plot_percentage_histogram(
+                        data=specific_date_data, 
+                        column_to_aggregate='CAMPAIGN ID',
+                        selected_date=str(selected_date), 
+                        top_campaigns=top_campaigns, 
+                        aggregation_column=remaining_columns[-1]
+                    )
+                else:
+                    fig = plot_piechart(
+                        data=specific_date_data, 
+                        column_to_aggregate='CAMPAIGN ID',
+                        selected_date=str(selected_date), 
+                        top_campaigns=top_campaigns, 
+                        other_campaigns=other_campaigns, 
+                        aggregation_column=remaining_columns[-1],
+                        combine_others = combine_others                        
+                    )
+                st.plotly_chart(fig)
     else:
         st.warning("请上传包含有效数据的文件以进行分析！")
 else:
