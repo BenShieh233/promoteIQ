@@ -443,81 +443,83 @@ if selected_page == "百分比分布" and available_columns:
         st.warning("请检查上传文件格式是否正确")
 
 if selected_page == "关联销售额分析":
-    if not st.session_state["uploaded_campaign_summary"].empty or st.session_state["uploaded_sales_report"].empty:
+    if not st.session_state["uploaded_campaign_summary"].empty:
         campaign = st.session_state["uploaded_campaign_summary"]
-        sales = st.session_state["uploaded_sales_report"]
+        if not st.session_state["uploaded_sales_report"].empty:
+            sales = st.session_state["uploaded_sales_report"]
+
+        st.subheader("关联销售额分析")
+        st.write(sales)
+
+        # 数据处理部分
+        promoted_sku_aggregated = campaign.groupby(['CAMPAIGN ID', 'DATE'])['PROMOTED SKU'] \
+            .apply(set).reset_index()
+
+        merged = sales.merge(promoted_sku_aggregated, on=['CAMPAIGN ID', 'DATE'], how='left')
+        merged['Is Promoted'] = merged.apply(lambda row: row['PURCHASED SKU'] in row['PROMOTED SKU'], axis=1)
+
+        # 数据处理部分
+        grouped_sales = merged.groupby(['CAMPAIGN ID', 'Is Promoted'])['TOTAL SALES'].sum().reset_index()
+        grouped_sales['Category'] = grouped_sales['Is Promoted'].map({True: 'Promoted SKU', False: 'Non-Promoted SKU'})
+        grouped_sales['Total'] = grouped_sales.groupby('CAMPAIGN ID')['TOTAL SALES'].transform('sum')
+        grouped_sales['Sales Contribution (%)'] = (grouped_sales['TOTAL SALES'] / grouped_sales['Total']) * 100
+
+        # 自定义配色方案，只为 SKU 层（Category）指定颜色
+        color_map = {
+            'Promoted SKU': 'blue',  
+            'Non-Promoted SKU': 'pink'  # 只为 SKU 分类设定颜色
+        }
+        st.write(grouped_sales)
+        # Sunburst 图
+        fig = px.sunburst(
+            grouped_sales,
+            path=['CAMPAIGN ID', 'Category'],  # CAMPAIGN ID 只是路径，不参与颜色映射
+            values='TOTAL SALES',
+            color='Category',  # 只有 'Category'（SKU）层级有颜色
+            color_discrete_map=color_map,  # 使用自定义配色方案
+            title= "按活动 ID 分类的销售贡献（promoted SKU 与 non promoted SKU）"
+        )
+
+        fig.update_traces(textinfo="label+percent entry")
+
+        # 更新布局，设置背景颜色等
+        fig.update_layout(
+            plot_bgcolor='white',  # 背景色为白色
+            paper_bgcolor='white',  # 图表纸张背景色为白色
+            title="按Campaign ID 分类的Total Sales贡献（promoted SKU 与 non promoted SKU）",
+            height=800,
+            width=1200,
+            margin=dict(t=50, b=50, l=50, r=50)  # 调整边距
+        )
+
+        # 显示图表
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 添加 CAMPAIGN ID 选择框，确保按升序排列
+        selected_campaign_id = st.selectbox(
+            "选择一个 CAMPAIGN ID 查看每日销售趋势:",
+            options=sorted(merged['CAMPAIGN ID'].unique())  # 使用 sorted() 确保按升序排列
+        )
+
+
+        # 筛选所选 CAMPAIGN ID 的数据
+        filtered_sales = merged[merged['CAMPAIGN ID'] == selected_campaign_id]
+        daily_sales = filtered_sales.groupby(['DATE', 'Is Promoted'])['TOTAL SALES'].sum().reset_index()
+        daily_sales['Category'] = daily_sales['Is Promoted'].map({True: 'Promoted SKU', False: 'Non-Promoted SKU'})
+
+        # Plotly 柱状图：每日销售趋势
+        fig2 = px.bar(
+            daily_sales,
+            x='DATE',
+            y='TOTAL SALES',
+            color='Category',
+            barmode='group',
+            title=f'Daily Sales Trend for {selected_campaign_id} (Promoted vs Non-Promoted SKUs)',
+            labels={'TOTAL SALES': 'Sales Amount', 'DATE': 'Date'},
+            color_discrete_map={'Promoted SKU': 'blue', 'Non-Promoted SKU': 'orange'}
+        )
+        fig2.update_xaxes(type='category')
+        st.plotly_chart(fig2, use_container_width=True)
     else:
         st.warning("请检查是否同时上传了campaign summary和sales report两份Excel文件")
 
-    st.subheader("关联销售额分析")
-    st.write(sales)
-
-    # 数据处理部分
-    promoted_sku_aggregated = campaign.groupby(['CAMPAIGN ID', 'DATE'])['PROMOTED SKU'] \
-        .apply(set).reset_index()
-
-    merged = sales.merge(promoted_sku_aggregated, on=['CAMPAIGN ID', 'DATE'], how='left')
-    merged['Is Promoted'] = merged.apply(lambda row: row['PURCHASED SKU'] in row['PROMOTED SKU'], axis=1)
-
-    # 数据处理部分
-    grouped_sales = merged.groupby(['CAMPAIGN ID', 'Is Promoted'])['TOTAL SALES'].sum().reset_index()
-    grouped_sales['Category'] = grouped_sales['Is Promoted'].map({True: 'Promoted SKU', False: 'Non-Promoted SKU'})
-    grouped_sales['Total'] = grouped_sales.groupby('CAMPAIGN ID')['TOTAL SALES'].transform('sum')
-    grouped_sales['Sales Contribution (%)'] = (grouped_sales['TOTAL SALES'] / grouped_sales['Total']) * 100
-
-    # 自定义配色方案，只为 SKU 层（Category）指定颜色
-    color_map = {
-        'Promoted SKU': 'blue',  
-        'Non-Promoted SKU': 'pink'  # 只为 SKU 分类设定颜色
-    }
-    st.write(grouped_sales)
-    # Sunburst 图
-    fig = px.sunburst(
-        grouped_sales,
-        path=['CAMPAIGN ID', 'Category'],  # CAMPAIGN ID 只是路径，不参与颜色映射
-        values='TOTAL SALES',
-        color='Category',  # 只有 'Category'（SKU）层级有颜色
-        color_discrete_map=color_map,  # 使用自定义配色方案
-        title= "按活动 ID 分类的销售贡献（promoted SKU 与 non promoted SKU）"
-    )
-
-    fig.update_traces(textinfo="label+percent entry")
-
-    # 更新布局，设置背景颜色等
-    fig.update_layout(
-        plot_bgcolor='white',  # 背景色为白色
-        paper_bgcolor='white',  # 图表纸张背景色为白色
-        title="按Campaign ID 分类的Total Sales贡献（promoted SKU 与 non promoted SKU）",
-        height=800,
-        width=1200,
-        margin=dict(t=50, b=50, l=50, r=50)  # 调整边距
-    )
-
-    # 显示图表
-    st.plotly_chart(fig, use_container_width=True)
-
-    # 添加 CAMPAIGN ID 选择框，确保按升序排列
-    selected_campaign_id = st.selectbox(
-        "选择一个 CAMPAIGN ID 查看每日销售趋势:",
-        options=sorted(merged['CAMPAIGN ID'].unique())  # 使用 sorted() 确保按升序排列
-    )
-
-
-    # 筛选所选 CAMPAIGN ID 的数据
-    filtered_sales = merged[merged['CAMPAIGN ID'] == selected_campaign_id]
-    daily_sales = filtered_sales.groupby(['DATE', 'Is Promoted'])['TOTAL SALES'].sum().reset_index()
-    daily_sales['Category'] = daily_sales['Is Promoted'].map({True: 'Promoted SKU', False: 'Non-Promoted SKU'})
-
-    # Plotly 柱状图：每日销售趋势
-    fig2 = px.bar(
-        daily_sales,
-        x='DATE',
-        y='TOTAL SALES',
-        color='Category',
-        barmode='group',
-        title=f'Daily Sales Trend for {selected_campaign_id} (Promoted vs Non-Promoted SKUs)',
-        labels={'TOTAL SALES': 'Sales Amount', 'DATE': 'Date'},
-        color_discrete_map={'Promoted SKU': 'blue', 'Non-Promoted SKU': 'orange'}
-    )
-    fig2.update_xaxes(type='category')
-    st.plotly_chart(fig2, use_container_width=True)
