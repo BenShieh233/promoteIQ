@@ -21,7 +21,7 @@ def plot_piechart(data: pd.DataFrame,
         names=percentages.index,
         values=percentages.values,
         title=f"{aggregation_column} 在 {selected_date} 的百分比分布分析",
-        color=percentages.index,
+        color=percentages.index
     )
     return fig
     
