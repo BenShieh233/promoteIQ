@@ -28,7 +28,7 @@ units_mapping = {
     'CPC': 'USD',
     'CPM': 'USD',
     'CTR': 'Percentage (%)',
-    'ROAS': 'Ratio'
+    'ROAS': 'Percentage (%)'
 }
 
 # 数据导入页面
@@ -372,6 +372,7 @@ if selected_page == "百分比分布" and available_columns:
         for i in range(0, num_remaining_columns, 2):
             cols = st.columns(2)
             with cols[0]:
+                fig_key = f"chart_{remaining_columns[i]}"
                 if remaining_columns[i] in ['CTR', 'ROAS']:
                     fig = plot_percentage_histogram(
                         data=specific_date_data, 
@@ -390,9 +391,11 @@ if selected_page == "百分比分布" and available_columns:
                         aggregation_column=remaining_columns[i],
                         combine_others=combine_others
                     )
-                st.plotly_chart(fig)
-            if i + 1 < num_remaining_columns:  # 如果第二个图表存在
+                st.plotly_chart(fig, key=fig_key)  # 添加唯一 key
+
+            if i + 1 < num_remaining_columns:  # 第二个图表
                 with cols[1]:
+                    fig_key = f"chart_{remaining_columns[i+1]}"
                     if remaining_columns[i+1] in ['CTR', 'ROAS']:
                         fig = plot_percentage_histogram(
                             data=specific_date_data, 
@@ -409,12 +412,10 @@ if selected_page == "百分比分布" and available_columns:
                             top_campaigns=top_campaigns, 
                             other_campaigns=other_campaigns, 
                             aggregation_column=remaining_columns[i+1],
-                            combine_others = combine_others
+                            combine_others=combine_others
                         )
-                    st.plotly_chart(fig)
-            else:  # 如果没有第二个图表，空白占位
-                with cols[1]:
-                    st.write("")  # 空白占位图表
+                    st.plotly_chart(fig, key=fig_key)  # 添加唯一 key
+
 
         # 如果最后剩下一个图表，单独占一行并居中
         if num_remaining_columns % 2 != 0:
