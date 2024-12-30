@@ -1,6 +1,7 @@
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.colors
 
 def process_data(data: pd.DataFrame, 
                  column_to_aggregate: str, 
@@ -27,6 +28,7 @@ def process_data(data: pd.DataFrame,
 
     # 根据日期范围过滤数据
     filtered_data = data[(data['DATE'] >= date_range[0]) & (data['DATE'] <= date_range[1])]
+
 
     # 根据 `column_to_aggregate` 对数据排序
     if column_to_aggregate in ['ROAS', 'CTR']:
@@ -205,6 +207,111 @@ def plot_percentage_histogram(data: pd.DataFrame,
     )
 
     return fig
+
+def plot_sankey(df, selected_primary, selected_metric, date_range, primary_label, secondary_label):
+
+    filtered_df = df[(df['DATE'].dt.date >= date_range[0]) &
+                     (df['DATE'].dt.date <= date_range[1]) &
+                     (df[primary_label] == selected_primary)]
+    
+    df = df[(df['DATE'].dt.date >= date_range[0]) &
+            (df['DATE'].dt.date <= date_range[1])]
+    
+    # 判断选择的指标，决定聚合方式
+    if selected_metric in ['CTR', 'ROAS']:
+        aggregation_function = 'mean'  # 对于 CTR 和 ROAS 使用平均数
+    else:
+        aggregation_function = 'sum'  # 其他指标使用总和
+    
+    # 初始关系图数据
+    grouped_df = filtered_df.groupby([primary_label, secondary_label], as_index=False).agg({
+        selected_metric: aggregation_function
+    })
+    
+    # 第二步数据准备：相关的 PROMOTED SKU 连接到 CAMPAIGN ID
+    related_secondary_values = grouped_df[secondary_label].unique()
+    reverse_filtered_df = df[df[secondary_label].isin(related_secondary_values)]
+    reverse_grouped_df = reverse_filtered_df.groupby([secondary_label, primary_label], as_index=False).agg({
+        selected_metric: aggregation_function
+    })
+    
+    # 根据 primary_label 调整合并顺序
+    if primary_label == 'PROMOTED SKU':
+        combined_data = pd.concat([
+            grouped_df.rename(columns={"PROMOTED SKU": "Source", "CAMPAIGN ID": "Target", selected_metric: "Value"}),
+            reverse_grouped_df.rename(columns={"CAMPAIGN ID": "Source", "PROMOTED SKU": "Target", selected_metric: "Value"})
+        ])
+    else:
+        combined_data = pd.concat([
+            grouped_df.rename(columns={"CAMPAIGN ID": "Source", "PROMOTED SKU": "Target", selected_metric: "Value"}),
+            reverse_grouped_df.rename(columns={"PROMOTED SKU": "Source", "CAMPAIGN ID": "Target", selected_metric: "Value"})
+        ])
+    
+    # 替换 TOTAL SALES 为 0 的值为一个小值，避免 Sankey 图显示异常
+    combined_data["Value"] = combined_data["Value"].replace(0, 1e-6)
+    
+    # 创建唯一标识符以标记互为连接的组
+    combined_data['Group'] = combined_data.apply(
+        lambda row: tuple(sorted([row['Source'], row['Target']])), axis=1
+    )
+    
+    # 定义颜色列表并为每个组分配颜色
+    color_palette = plotly.colors.qualitative.Set3
+    unique_groups = combined_data['Group'].unique()
+    group_to_color = {
+        group: color_palette[i % len(color_palette)]
+        for i, group in enumerate(unique_groups)
+    }
+    combined_data["Color"] = combined_data["Group"].map(group_to_color)
+    
+    # 创建 Sankey 图所需的唯一标签
+    unique_labels = pd.concat([combined_data["Source"], combined_data["Target"]]).unique()
+    label_to_index = {label: idx for idx, label in enumerate(unique_labels)}
+    
+    # 映射标签到索引
+    combined_data["Source"] = combined_data["Source"].map(label_to_index)
+    combined_data["Target"] = combined_data["Target"].map(label_to_index)
+    
+    # 创建 Sankey 图
+    fig = go.Figure(data=[go.Sankey(
+        textfont=dict(size=12, color='black'),
+        node=dict(
+            pad=30,
+            thickness=20,
+            line=dict(color="yellow", width=0.5),
+            label=[str(label) for label in unique_labels],
+            color='blue'
+        ),
+        link=dict(
+            source=combined_data["Source"],
+            target=combined_data["Target"],
+            value=combined_data["Value"],
+            color=combined_data["Color"],
+            hovertemplate=f"Source: %{{source.label}}<br>Target: %{{target.label}}<br>{selected_metric}: %{{value}}<extra></extra>"
+        )
+    )])
+    
+    # 更新图表布局
+    fig.update_layout(
+        title_text=f"{primary_label} - {secondary_label} - {primary_label} 关于{selected_metric}的流向图",
+        font_size=10,
+        width=1200,
+        height=800,
+        annotations=[
+            dict(
+                text="1.00μ表示销量为 0",
+                x=0.5,
+                y=-0.1,
+                showarrow=False
+            )
+        ]
+    )
+
+    sku_to_product_mapping = filtered_df[['PROMOTED SKU', 'PROMOTED PRODUCT / CREATIVE']].drop_duplicates()
+    grouped_df = pd.merge(grouped_df, sku_to_product_mapping, on='PROMOTED SKU', how='left')
+
+    # 返回图表
+    return grouped_df, fig
 
 # def plot_linechart(data: pd.DataFrame,
 #                    column_to_aggregate:str,

@@ -7,8 +7,6 @@ from utils import *
 from config import NUMERIC_COLUMNS, PAGES, UNITS_MAPPING
 import math
 
-
-
 # Streamlit 应用标题
 st.set_page_config(page_title="广告趋势分析", layout="wide")
 st.title("广告趋势分析面板")
@@ -130,14 +128,17 @@ if selected_page == "趋势分析":
     if not st.session_state["uploaded_campaign_summary"].empty:
         df = st.session_state["uploaded_campaign_summary"]
         st.subheader("趋势分析")
-        aggregation_field = st.selectbox("选择需要分析的参数:", options=NUMERIC_COLUMNS, index=0)
+        col1, col2 = st.columns(2)
+        with col1:
+            aggregation_field = st.selectbox("选择需要分析的参数:", options=NUMERIC_COLUMNS, index=0)
+        with col2:
         # 用户选择日期范围
-        date_range = st.date_input(
-            "选择需要分析的时间段:",
-            value=[df['DATE'].min(), df['DATE'].max()],
-            min_value=df['DATE'].min(),
-            max_value=df['DATE'].max(),
-        )
+            date_range = st.date_input(
+                "选择需要分析的时间段:",
+                value=[df['DATE'].min(), df['DATE'].max()],
+                min_value=df['DATE'].min(),
+                max_value=df['DATE'].max(),
+            )
         # 用户通过滑块选择排名范围
         max_campaigns = len(df['CAMPAIGN ID'].unique())
         min_rank, max_rank = st.slider(
@@ -169,7 +170,7 @@ if selected_page == "趋势分析":
         st.write("### 选择一个 Campaign 进行分析：")
 
         # 分页参数
-        items_per_page = 5
+        items_per_page = 10
         total_pages = math.ceil(len(campaign_ids) / items_per_page)
         current_page = st.number_input('选择页面:', min_value=1, max_value=total_pages, value=1)
 
@@ -190,6 +191,7 @@ if selected_page == "趋势分析":
 
         # 如果选定了 Campaign ID，则继续显示参数选择和图表
         # 如果有选定的 Campaign ID，显示该选择
+
         if 'selected_campaign_id' in st.session_state:
             selected_campaign_id = st.session_state.selected_campaign_id
             # 用户选择两个参数进行比较
@@ -211,8 +213,92 @@ if selected_page == "趋势分析":
                     value=f"{total_values[selected_params[1]]:.2f} {UNITS_MAPPING.get(selected_params[1], '')}"
                 )
 
+                st.divider()
+
+                # 筛选逻辑
+                df = df[(df['DATE'] >= date_range[0]) & (df['DATE'] <= date_range[1])]
+                filtered_df = df[df['CAMPAIGN ID'] == selected_campaign_id]
+
+                # 提取所需列，并去重
+                if not filtered_df.empty:
+                    # 转换为整数并移除 .0
+                    filtered_df['PROMOTED PRODUCT / CREATIVE ID'] = (
+                        filtered_df['PROMOTED PRODUCT / CREATIVE ID']
+                        .fillna(0)  # 避免 NaN 引发问题
+                        .apply(lambda x: str(int(x)) if pd.notnull(x) else "")
+                    )
+                    # 转换为整数并移除 .0
+                    filtered_df['PROMOTED SKU'] = (
+                        filtered_df['PROMOTED SKU']
+                        .fillna(0)  # 避免 NaN 引发问题
+                        .apply(lambda x: str(int(x)) if pd.notnull(x) else "")
+                    )
+                    unique_products = filtered_df[['PROMOTED SKU', 'PROMOTED PRODUCT / CREATIVE ID', 'PROMOTED PRODUCT / CREATIVE']].drop_duplicates().reset_index(drop=True)
+                    st.write(f"##### Campaign ID {selected_campaign_id} - 包含的所有Promoted SKU")
+                    st.dataframe(unique_products)
+                else:
+                    st.write("No data available for the selected Campaign ID.")
+
+                # 绘图
+                # 按不同方式聚合数据
+                aggregated_df = (
+                    filtered_df.groupby(['DATE', 'PROMOTED SKU'], as_index=False)
+                    .agg({
+                        'TOTAL SALES': 'sum',
+                        'SPEND': 'sum',
+                        'IMPRESSIONS': 'sum',
+                        'CLICKS': 'sum',
+                        'CPC': 'sum',
+                        'CPM': 'sum',
+                        'CTR': 'mean',
+                        'ROAS': 'mean'
+                    })
+                )
+                if not aggregated_df.empty:
+                    all_metrics = NUMERIC_COLUMNS
+
+                    # 使用 st.columns 将两个下拉框放在同一行
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        metric1 = st.selectbox("选择第一个指标", options=all_metrics, index=0)  # 默认选择第一个指标
+                    with col2:
+                        metric2 = st.selectbox("选择第二个指标", options=all_metrics, index=1)  # 默认选择第二个指标
+
+                    # 检查用户是否选择了相同的参数
+                    if metric1 == metric2:
+                        st.error("两个指标不能相同，请选择不同的指标。")
+                    else:
+                        # 绘制第一个指标图
+                        st.write(f"### Promoted SKU 在 {metric1} 中的趋势")
+                        fig1 = px.line(
+                            aggregated_df,
+                            x="DATE",
+                            y=metric1,
+                            color="PROMOTED SKU",
+                            markers=True,
+                            title=f"{metric1} Trend",
+                            labels={"DATE": "Date", metric1: metric1, "PROMOTED SKU": "SKU"},
+                        )
+                        fig1.update_layout(legend_title="Promoted SKU", xaxis_title="Date", yaxis_title=metric1)
+                        st.plotly_chart(fig1)
+
+                        st.write(f"### Promoted SKU 在 {metric2} 中的趋势")
+                        fig2 = px.line(
+                            aggregated_df,
+                            x="DATE",
+                            y=metric2,
+                            color="PROMOTED SKU",
+                            markers=True,
+                            title=f"{metric2} Trend",
+                            labels={"DATE": "Date", metric2: metric2, "PROMOTED SKU": "SKU"},
+                        )
+                        fig2.update_layout(legend_title="Promoted SKU", xaxis_title="Date", yaxis_title=metric2)
+                        st.plotly_chart(fig2)
+                else:
+                    st.write("No data available for the selected SKUs.")
             else:
-                st.warning("请确保选择了两个参数进行比较！")
+                st.warning("请确保选择了两个参数进行比较！")                
         else:
             st.warning("请选择一个 Campaign ID！")
 
@@ -220,141 +306,101 @@ if selected_page == "百分比分布":
     if not st.session_state["uploaded_campaign_summary"].empty:
         df = st.session_state["uploaded_campaign_summary"]
 
-        st.subheader("百分比分布分析")
-        aggregation_field = st.selectbox("选择需要分析的参数:", options=NUMERIC_COLUMNS)
+        def generate_distribution_analysis(df, groupby_field):
+            """
+            Function to generate percentage distribution and plotting for a given groupby field.
 
-        # 用户选择日期范围
-        date_range = st.date_input(
-            "选择需要分析的时间段:",
-            value=[df['DATE'].min(), df['DATE'].max()],
-            min_value=df['DATE'].min(),
-            max_value=df['DATE'].max(),
+            Parameters:
+                df (DataFrame): The uploaded campaign summary data.
+                groupby_field (str): The field to group by ('CAMPAIGN ID' or 'PROMOTED SKU').
+            """
+            st.subheader(f"百分比分布分析 - 按 {groupby_field}")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                aggregation_field = st.selectbox("选择需要分析的参数:", options=NUMERIC_COLUMNS, index=0)
+            with col2:
+                date_range = st.date_input(
+                    "选择需要分析的时间段:",
+                    value=[df['DATE'].min(), df['DATE'].max()],
+                    min_value=df['DATE'].min(),
+                    max_value=df['DATE'].max(),
+                )
+            
+            combine_others = st.checkbox("将其余分组归类为 Others", value=True)
+            filtered_df = df[(df['DATE'] >= date_range[0]) & (df['DATE'] <= date_range[1])]
+
+            agg_func = calculate_by_column_type(aggregation_field)
+            df_summary = filtered_df.groupby(groupby_field).agg({aggregation_field: agg_func}).sort_values(by=aggregation_field, ascending=False)
+
+            top_n = st.slider(
+                f"选择展示前 N 个{groupby_field}:",
+                min_value=1,
+                max_value=len(df_summary),
+                value=min(5, len(df_summary)),
+            )
+
+            top_groups = df_summary.head(top_n).index.tolist()
+            other_groups = df_summary[~df_summary.index.isin(top_groups)].index.tolist()
+
+            sum_columns = ['TOTAL SALES', 'IMPRESSIONS', 'CLICKS', 'SPEND', 'CPC', 'CPM']
+            mean_columns = ['CTR', 'ROAS']
+
+            if aggregation_field in sum_columns:
+                for i in range(0, len(sum_columns), 2):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        fig = plot_piechart(filtered_df, groupby_field, top_groups, other_groups, sum_columns[i], combine_others)
+                        st.plotly_chart(fig, key=f"{groupby_field}_pie_{i}")
+
+                    if i + 1 < len(sum_columns):
+                        with col2:
+                            fig = plot_piechart(filtered_df, groupby_field, top_groups, other_groups, sum_columns[i + 1], combine_others)
+                            st.plotly_chart(fig, key=f"{groupby_field}_pie_{i + 1}")
+
+                for i in range(0, len(mean_columns), 2):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        fig = plot_percentage_histogram(filtered_df, groupby_field, top_groups, mean_columns[i])
+                        st.plotly_chart(fig, key=f"{groupby_field}_hist_{mean_columns[i]}_1")
+
+                    if i + 1 < len(mean_columns):
+                        with col2:
+                            fig = plot_percentage_histogram(filtered_df, groupby_field, top_groups, mean_columns[i + 1])
+                            st.plotly_chart(fig, key=f"{groupby_field}_hist_{mean_columns[i + 1]}_2")
+
+            else:
+                for i in range(0, len(mean_columns), 2):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        fig = plot_percentage_histogram(filtered_df, groupby_field, top_groups, mean_columns[i])
+                        st.plotly_chart(fig, key=f"{groupby_field}_hist_{mean_columns[i]}_1")
+
+                    if i + 1 < len(mean_columns):
+                        with col2:
+                            fig = plot_percentage_histogram(filtered_df, groupby_field, top_groups, mean_columns[i + 1])
+                            st.plotly_chart(fig, key=f"{groupby_field}_hist_{mean_columns[i + 1]}_2")
+
+                for i in range(0, len(sum_columns), 2):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        fig = plot_piechart(filtered_df, groupby_field, top_groups, other_groups, sum_columns[i], combine_others)
+                        st.plotly_chart(fig, key=f"{groupby_field}_pie_{i}")
+
+                    if i + 1 < len(sum_columns):
+                        with col2:
+                            fig = plot_piechart(filtered_df, groupby_field, top_groups, other_groups, sum_columns[i + 1], combine_others)
+                            st.plotly_chart(fig, key=f"{groupby_field}_pie_{i + 1}")
+        # 为用户提供选择分组字段的选项
+        groupby_field = st.radio(
+            "选择分组字段:",
+            options=['CAMPAIGN ID', 'PROMOTED SKU'],  # 提供选项
+            index=0  # 默认选择第一个选项
         )
 
-        combine_others = st.checkbox("将其余 Campaign ID 归类为 Others", value=True)
+# 调用分组分析函数
+        generate_distribution_analysis(df, groupby_field)
 
-        filtered_df = df[(df['DATE'] >= date_range[0]) & (df['DATE'] <= date_range[1])]
-
-        agg_func = calculate_by_column_type(aggregation_field)
-        df_summary = filtered_df.groupby('CAMPAIGN ID').agg({aggregation_field: agg_func}).sort_values(by=aggregation_field, ascending=False)
-
-        top_n = st.slider(
-            "选择展示前 N 个Campaign ID:",
-            min_value=1,
-            max_value=len(df_summary),
-            value=min(5, len(df_summary)),
-        )
-        top_n_campaigns = df_summary.head(top_n)
-
-        top_campaigns = top_n_campaigns.index.tolist()
-        other_campaigns = df_summary[~df_summary.isin(top_campaigns)].index.tolist()
-        sum_columns = ['TOTAL SALES', 'IMPRESSIONS', 'CLICKS', 'SPEND', 'CPC', 'CPM']
-        mean_columns = ['CTR', 'ROAS']
-
-        if aggregation_field in sum_columns:
-            # 排列顺序
-            remaining_columns = [col for col in sum_columns if col != aggregation_field]
-            plot_columns = [aggregation_field] + remaining_columns
-            
-            # 求和列显示：每行两张图
-            for i in range(0, len(plot_columns), 2):
-                col1, col2 = st.columns(2)  # 创建两列布局
-                with col1:
-                    fig_aggregation_field = plot_piechart(filtered_df,
-                                                        "CAMPAIGN ID",
-                                                        top_campaigns,
-                                                        other_campaigns,
-                                                        plot_columns[i],
-                                                        combine_others
-                    )
-                    # 为每个图表设置唯一的 key
-                    st.plotly_chart(fig_aggregation_field, key=f"piechart_{i}")
-                
-                if i + 1 < len(plot_columns):
-                    with col2:
-                        fig_aggregation_field = plot_piechart(filtered_df,
-                                                            "CAMPAIGN ID",
-                                                            top_campaigns,
-                                                            other_campaigns,
-                                                            plot_columns[i + 1],
-                                                            combine_others
-                        )
-                        # 为每个图表设置唯一的 key
-                        st.plotly_chart(fig_aggregation_field, key=f"piechart_{i + 1}")
-            
-            # 紧接着绘制均值列的直方图（如 CTR, ROAS）
-            for i in range(0, len(mean_columns), 2):
-                col1, col2 = st.columns(2)  # 每行两个图
-                with col1:
-                    fig_percentage_histogram = plot_percentage_histogram(filtered_df,
-                                                                        "CAMPAIGN ID",
-                                                                        top_campaigns,
-                                                                        mean_columns[i]
-                    )
-                    # 为每个图表设置唯一的 key
-                    st.plotly_chart(fig_percentage_histogram, key=f"histogram_{mean_columns[i]}_1")
-                
-                if i + 1 < len(mean_columns):
-                    with col2:
-                        fig_percentage_histogram = plot_percentage_histogram(filtered_df,
-                                                                            "CAMPAIGN ID",
-                                                                            top_campaigns,
-                                                                            mean_columns[i + 1]
-                        )
-                        # 为每个图表设置唯一的 key
-                        st.plotly_chart(fig_percentage_histogram, key=f"histogram_{mean_columns[i + 1]}_2")
-
-        else:
-            # 如果选择的是均值列，显示直方图
-            remaining_columns = [col for col in mean_columns if col != aggregation_field]
-            plot_columns = [aggregation_field] + remaining_columns
-            
-            for i in range(0, len(plot_columns), 2):
-                col1, col2 = st.columns(2)  # 每行两个图
-                with col1:
-                    fig_percentage_histogram = plot_percentage_histogram(filtered_df,
-                                                                        "CAMPAIGN ID",
-                                                                        top_campaigns,
-                                                                        plot_columns[i]
-                    )
-                    # 为每个图表设置唯一的 key
-                    st.plotly_chart(fig_percentage_histogram, key=f"histogram_{plot_columns[i]}_1")
-                
-                if i + 1 < len(plot_columns):
-                    with col2:
-                        fig_percentage_histogram = plot_percentage_histogram(filtered_df,
-                                                                            "CAMPAIGN ID",
-                                                                            top_campaigns,
-                                                                            plot_columns[i + 1]
-                        )
-                        # 为每个图表设置唯一的 key
-                        st.plotly_chart(fig_percentage_histogram, key=f"histogram_{plot_columns[i + 1]}_2")
-            
-            # 接着绘制求和列的饼图
-            for i in range(0, len(sum_columns), 2):
-                col1, col2 = st.columns(2)  # 创建两列布局
-                with col1:
-                    fig_aggregation_field = plot_piechart(filtered_df,
-                                                        "CAMPAIGN ID",
-                                                        top_campaigns,
-                                                        other_campaigns,
-                                                        sum_columns[i],
-                                                        combine_others
-                    )
-                    # 为每个图表设置唯一的 key
-                    st.plotly_chart(fig_aggregation_field, key=f"piechart_{i}")
-                
-                if i + 1 < len(sum_columns):
-                    with col2:
-                        fig_aggregation_field = plot_piechart(filtered_df,
-                                                            "CAMPAIGN ID",
-                                                            top_campaigns,
-                                                            other_campaigns,
-                                                            sum_columns[i + 1],
-                                                            combine_others
-                        )
-                        # 为每个图表设置唯一的 key
-                        st.plotly_chart(fig_aggregation_field, key=f"piechart_{i + 1}")
     else:
         st.warning("请检查上传文件格式是否正确")
 
@@ -376,8 +422,7 @@ if selected_page == "关联销售额分析":
             sales = sales[(sales['DATE'] >= date_range[0]) & (sales['DATE'] <= date_range[1])]
 
             st.subheader("关联销售额分析")
-            st.write(sales)
-                                                                                                                                                      
+
             # 数据处理部分
             promoted_sku_aggregated = campaign.groupby(['CAMPAIGN ID', 'DATE'])['PROMOTED SKU'] \
                 .apply(set).reset_index()
@@ -447,9 +492,72 @@ if selected_page == "关联销售额分析":
             )
             fig2.update_xaxes(type='category')
             st.plotly_chart(fig2, use_container_width=True)
+
+            st.write(filtered_sales)
         else:
             st.warning("请检查是否同时上传了campaign summary和sales report两份Excel文件")
     except Exception:
         st.warning("请检查是否同时上传了 Campaign Performance 和 sales Report 两份文件")
 
+if selected_page == "广告活动与SKU各指标流向":
+    if not st.session_state["uploaded_campaign_summary"].empty:
+        df = st.session_state["uploaded_campaign_summary"]
+                # 去除包含 NaN 值的行
+        df_cleaned = df.dropna(subset=['CAMPAIGN ID', 'PROMOTED SKU'])
 
+        # 将 CAMPAIGN ID 和 PROMOTED SKU 转换为不带小数点的字符串
+        df_cleaned['CAMPAIGN ID'] = df_cleaned['CAMPAIGN ID'].astype(str).apply(lambda x: x.split('.')[0])
+        df_cleaned['PROMOTED SKU'] = df_cleaned['PROMOTED SKU'].astype(str).apply(lambda x: x.split('.')[0])
+        df_cleaned['DATE'] = pd.to_datetime(df_cleaned['DATE'], errors='coerce')
+
+
+        st.subheader("广告活动与SKU各指标流向")
+        primary_choice = st.radio("选择初始关系图展示方式", ["CAMPAIGN ID", "PROMOTED SKU"])
+
+        if primary_choice == "CAMPAIGN ID":
+            unique_primary_values = df_cleaned['CAMPAIGN ID'].unique()
+            primary_label = 'CAMPAIGN ID'
+            secondary_label = 'PROMOTED SKU'
+        else:
+            unique_primary_values = df_cleaned['PROMOTED SKU'].unique()
+            primary_label = 'PROMOTED SKU'
+            secondary_label = 'CAMPAIGN ID'
+
+        metrics = NUMERIC_COLUMNS
+
+        if 'selected_campaign_id' in st.session_state:
+            selected_campaign_id = st.session_state.selected_campaign_id
+        else:
+            selected_campaign_id = None  # 没有选择时设置为 None
+
+        # 设置默认值
+        if selected_campaign_id:
+            # 如果已选定 Campaign ID, 设置为该值
+            default_primary = selected_campaign_id if selected_campaign_id in unique_primary_values else unique_primary_values[0]
+        else:
+            # 如果没有选定 Campaign ID，设置第一个唯一值为默认值
+            default_primary = unique_primary_values[0]
+
+        col1, col2, col3  = st.columns(3)
+        with col1:
+            # 如果没有选中 Campaign ID，设置第一个唯一值为默认值
+            if selected_campaign_id:
+                selected_primary = st.selectbox(f"选择一个 {primary_label}", unique_primary_values, index=list(unique_primary_values).index(default_primary))
+            else:
+                selected_primary = st.selectbox(f"选择一个 {primary_label}", unique_primary_values)    
+        with col2:
+            selected_metric = st.selectbox("选择指标", metrics, index=metrics.index('TOTAL SALES'))
+        with col3:
+            date_range = st.date_input("选择日期范围", [df_cleaned['DATE'].min(), df_cleaned['DATE'].max()])
+
+        grouped_df, fig = plot_sankey(df_cleaned, 
+                        selected_primary=selected_primary,
+                        selected_metric=selected_metric,
+                        date_range=date_range,
+                        primary_label=primary_label,
+                        secondary_label=secondary_label)
+        
+        st.plotly_chart(fig)
+        st.write(grouped_df)
+    else:
+        st.warning("请检查文件格式是否正确")
