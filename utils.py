@@ -60,3 +60,36 @@ def calculate_by_column_type(selected_column):
     else:  # 求和列
         agg_func = 'sum'
     return agg_func
+
+def calculate_aggregated_score(filtered_df, weights):
+    """
+    计算整个时间段内的累计评分。
+
+    Parameters:
+        filtered_df (DataFrame): 过滤后的数据。
+        weights (dict): 每个指标的权重，例如 {'TOTAL SALES': 0.4, 'CLICKS': 0.3, 'ROAS': 0.3}。
+
+    Returns:
+        DataFrame: 包含每个 Campaign 的总评分。
+    """
+    # 按 Campaign 累计指标
+    aggregated_df = filtered_df.groupby('CAMPAIGN ID').agg({
+        'TOTAL SALES': 'sum',
+        'CLICKS': 'mean',  # 比例型指标取均值
+        'SPEND': 'sum',
+        # 其他需要的指标...
+    }).reset_index()
+
+    # 归一化
+    for col in weights.keys():
+        aggregated_df[f"{col}_norm"] = (
+            aggregated_df[col] - aggregated_df[col].min()
+        ) / (aggregated_df[col].max() - aggregated_df[col].min())
+
+    # 计算总评分
+    aggregated_df['Total Score'] = sum(
+        weights[col] * aggregated_df[f"{col}_norm"] for col in weights.keys()
+    )
+    
+    return aggregated_df[['CAMPAIGN ID', 'Total Score']].sort_values(by='Total Score', ascending=False)
+

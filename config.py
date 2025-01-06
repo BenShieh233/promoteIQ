@@ -1,7 +1,7 @@
 # 配置模块：config.py
 
 # 页面选项
-PAGES = ["数据导入", "数据预览", "趋势分析", "百分比分布", "关联销售额分析", "广告活动与SKU各指标流向"]
+PAGES = ["数据导入", "数据预览", "趋势分析", "百分比分布", "关联销售额分析", "广告活动与SKU各指标流向", "广告效果评分"]
 
 # 数值列配置
 NUMERIC_COLUMNS = ['TOTAL SALES', 'IMPRESSIONS', 'CLICKS', 'SPEND', 'CPC', 'CPM', 'CTR', 'ROAS']

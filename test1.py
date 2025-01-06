@@ -392,13 +392,13 @@ if selected_page == "百分比分布":
                             fig = plot_piechart(filtered_df, groupby_field, top_groups, other_groups, sum_columns[i + 1], combine_others)
                             st.plotly_chart(fig, key=f"{groupby_field}_pie_{i + 1}")
         # 为用户提供选择分组字段的选项
-        groupby_field = st.radio(
+        groupby_field = st.sidebar.radio(
             "选择分组字段:",
             options=['CAMPAIGN ID', 'PROMOTED SKU'],  # 提供选项
             index=0  # 默认选择第一个选项
         )
 
-# 调用分组分析函数
+        # 调用分组分析函数
         generate_distribution_analysis(df, groupby_field)
 
     else:
@@ -412,7 +412,7 @@ if selected_page == "关联销售额分析":
                 sales = st.session_state["uploaded_sales_report"]
             # 用户选择日期范围
 
-            date_range = st.date_input(
+            date_range = st.sidebar.date_input(
                 "选择需要分析的时间段:",
                 value=[sales['DATE'].min(), sales['DATE'].max()],
                 min_value=sales['DATE'].min(),
@@ -468,7 +468,7 @@ if selected_page == "关联销售额分析":
             st.plotly_chart(fig, use_container_width=True)
 
             # 添加 CAMPAIGN ID 选择框，确保按升序排列
-            selected_campaign_id = st.selectbox(
+            selected_campaign_id = st.sidebar.selectbox(
                 "选择一个 CAMPAIGN ID 查看每日销售趋势:",
                 options=sorted(merged['CAMPAIGN ID'].unique())  # 使用 sorted() 确保按升序排列
             )
@@ -512,7 +512,7 @@ if selected_page == "广告活动与SKU各指标流向":
 
 
         st.subheader("广告活动与SKU各指标流向")
-        primary_choice = st.radio("选择初始关系图展示方式", ["CAMPAIGN ID", "PROMOTED SKU"])
+        primary_choice = st.sidebar.radio("选择初始关系图展示方式", ["CAMPAIGN ID", "PROMOTED SKU"])
 
         if primary_choice == "CAMPAIGN ID":
             unique_primary_values = df_cleaned['CAMPAIGN ID'].unique()
@@ -561,3 +561,72 @@ if selected_page == "广告活动与SKU各指标流向":
         st.write(grouped_df)
     else:
         st.warning("请检查文件格式是否正确")
+
+if selected_page == "广告效果评分":
+    if not st.session_state["uploaded_campaign_summary"].empty:
+        df = st.session_state["uploaded_campaign_summary"]
+
+        # 日期范围选择
+        st.sidebar.subheader("选择统计周期")
+        min_date, max_date = df["DATE"].min(), df["DATE"].max()
+        date_range = st.sidebar.date_input(
+            "选择日期范围:",
+            value=[min_date, max_date],
+            min_value=min_date,
+            max_value=max_date,
+        )
+        # 如果用户未选择结束日期，自动设置为最大日期
+        if len(date_range) == 1:
+            start_date = date_range[0]
+            end_date = max_date
+        else:
+            start_date, end_date = date_range
+        df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
+
+        # Streamlit Sidebar
+        st.sidebar.header("选择分析维度和权重")
+
+        axis_option = st.sidebar.selectbox("统计轴", options=["CAMPAIGN ID", "PROMOTED SKU"])
+        # 使用 slider 设置权重并保留一位小数
+        w1 = round(st.sidebar.slider("TOTAL SALES 权重 (w1)", 0.0, 100.0, 33.3, step=0.1), 1)
+        w2 = round(st.sidebar.slider("ROAS 权重 (w2)", 0.0, 100.0, 33.3, step=0.1), 1)
+        w3 = round(st.sidebar.slider("SPEND 权重 (w3)", 0.0, 100.0, 33.3, step=0.1), 1)
+
+        # 确保总权重为 100%
+        total_weight = w1 + w2 + w3
+        if total_weight != 100:
+            st.sidebar.warning("权重总和必须为 100%。当前总和为 {:.1f}".format(total_weight))
+        else:
+            # 将权重转换为比例
+            w1 /= 100
+            w2 /= 100
+            w3 /= 100
+
+            # 数据聚合
+            grouped = df.groupby(axis_option).agg(
+                TOTAL_SALES=("TOTAL SALES", "sum"),
+                SPEND=("SPEND", "sum"),
+                ROAS=("ROAS", "mean")
+            ).reset_index()
+
+            # 数据归一化
+            grouped["TOTAL_SALES_NORM"] = (grouped["TOTAL_SALES"] - grouped["TOTAL_SALES"].min()) / \
+                                          (grouped["TOTAL_SALES"].max() - grouped["TOTAL_SALES"].min())
+            grouped["ROAS_NORM"] = (grouped["ROAS"] - grouped["ROAS"].min()) / \
+                                   (grouped["ROAS"].max() - grouped["ROAS"].min())
+            grouped["SPEND_NORM"] = (grouped["SPEND"] - grouped["SPEND"].min()) / \
+                                    (grouped["SPEND"].max() - grouped["SPEND"].min())
+
+            # 百分比加权评分
+            grouped["Score"] = (
+                w1 * grouped["TOTAL_SALES_NORM"] +
+                w2 * grouped["ROAS_NORM"] -
+                w3 * grouped["SPEND_NORM"]
+            )
+
+            # 动态显示结果
+            st.write(f"按 {axis_option} 汇总的结果")
+            if axis_option == "CAMPAIGN ID":
+                st.dataframe(grouped[["CAMPAIGN ID", "TOTAL_SALES", "SPEND", "ROAS", "Score"]])
+            elif axis_option == "PROMOTED SKU":
+                st.dataframe(grouped[["PROMOTED SKU", "TOTAL_SALES", "SPEND", "ROAS", "Score"]])
