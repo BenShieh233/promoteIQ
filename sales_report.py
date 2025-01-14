@@ -9,7 +9,7 @@ import math
 
 # Streamlit 应用标题
 st.set_page_config(page_title="广告趋势分析", layout="wide")
-st.title("广告趋势分析面板")
+st.sidebar.title("广告趋势分析面板")
 initialize_state()
 selected_page = st.sidebar.selectbox("选择页面", PAGES)
 
@@ -128,12 +128,8 @@ if selected_page == "趋势分析":
     if not st.session_state["uploaded_campaign_summary"].empty:
         df = st.session_state["uploaded_campaign_summary"]
         st.subheader("趋势分析")
-        col1, col2 = st.columns(2)
-        with col1:
-            aggregation_field = st.selectbox("选择需要分析的参数:", options=NUMERIC_COLUMNS, index=0)
-        with col2:
-        # 用户选择日期范围
-            date_range = st.date_input(
+        aggregation_field = st.sidebar.selectbox("选择需要分析的参数:", options=NUMERIC_COLUMNS, index=0)
+        date_range = st.sidebar.date_input(
                 "选择需要分析的时间段:",
                 value=[df['DATE'].min(), df['DATE'].max()],
                 min_value=df['DATE'].min(),
@@ -195,7 +191,7 @@ if selected_page == "趋势分析":
         if 'selected_campaign_id' in st.session_state:
             selected_campaign_id = st.session_state.selected_campaign_id
             # 用户选择两个参数进行比较
-            selected_params = st.multiselect("选择两个参数进行比较:", options=NUMERIC_COLUMNS, default=NUMERIC_COLUMNS[:2])
+            selected_params = st.multiselect("选择两个参数进行比较:", options=NUMERIC_COLUMNS, default=['TOTAL SALES', 'SPEND'])
             if len(selected_params) == 2:
                 fig_comparison, total_values, ranks = create_comparison_chart(df, selected_campaign_id, selected_params, UNITS_MAPPING, date_range=date_range)
                 # 显示图表
@@ -392,13 +388,13 @@ if selected_page == "百分比分布":
                             fig = plot_piechart(filtered_df, groupby_field, top_groups, other_groups, sum_columns[i + 1], combine_others)
                             st.plotly_chart(fig, key=f"{groupby_field}_pie_{i + 1}")
         # 为用户提供选择分组字段的选项
-        groupby_field = st.radio(
+        groupby_field = st.sidebar.radio(
             "选择分组字段:",
             options=['CAMPAIGN ID', 'PROMOTED SKU'],  # 提供选项
             index=0  # 默认选择第一个选项
         )
 
-# 调用分组分析函数
+        # 调用分组分析函数
         generate_distribution_analysis(df, groupby_field)
 
     else:
@@ -412,7 +408,7 @@ if selected_page == "关联销售额分析":
                 sales = st.session_state["uploaded_sales_report"]
             # 用户选择日期范围
 
-            date_range = st.date_input(
+            date_range = st.sidebar.date_input(
                 "选择需要分析的时间段:",
                 value=[sales['DATE'].min(), sales['DATE'].max()],
                 min_value=sales['DATE'].min(),
@@ -468,7 +464,7 @@ if selected_page == "关联销售额分析":
             st.plotly_chart(fig, use_container_width=True)
 
             # 添加 CAMPAIGN ID 选择框，确保按升序排列
-            selected_campaign_id = st.selectbox(
+            selected_campaign_id = st.sidebar.selectbox(
                 "选择一个 CAMPAIGN ID 查看每日销售趋势:",
                 options=sorted(merged['CAMPAIGN ID'].unique())  # 使用 sorted() 确保按升序排列
             )
@@ -512,7 +508,7 @@ if selected_page == "广告活动与SKU各指标流向":
 
 
         st.subheader("广告活动与SKU各指标流向")
-        primary_choice = st.radio("选择初始关系图展示方式", ["CAMPAIGN ID", "PROMOTED SKU"])
+        primary_choice = st.sidebar.radio("选择初始关系图展示方式", ["CAMPAIGN ID", "PROMOTED SKU"])
 
         if primary_choice == "CAMPAIGN ID":
             unique_primary_values = df_cleaned['CAMPAIGN ID'].unique()
@@ -538,17 +534,15 @@ if selected_page == "广告活动与SKU各指标流向":
             # 如果没有选定 Campaign ID，设置第一个唯一值为默认值
             default_primary = unique_primary_values[0]
 
-        col1, col2, col3  = st.columns(3)
-        with col1:
-            # 如果没有选中 Campaign ID，设置第一个唯一值为默认值
-            if selected_campaign_id:
-                selected_primary = st.selectbox(f"选择一个 {primary_label}", unique_primary_values, index=list(unique_primary_values).index(default_primary))
-            else:
-                selected_primary = st.selectbox(f"选择一个 {primary_label}", unique_primary_values)    
-        with col2:
-            selected_metric = st.selectbox("选择指标", metrics, index=metrics.index('TOTAL SALES'))
-        with col3:
-            date_range = st.date_input("选择日期范围", [df_cleaned['DATE'].min(), df_cleaned['DATE'].max()])
+
+        if selected_campaign_id:
+            selected_primary = st.sidebar.selectbox(f"选择一个 {primary_label}", unique_primary_values, index=list(unique_primary_values).index(default_primary))
+        else:
+            selected_primary = st.sidebar.selectbox(f"选择一个 {primary_label}", unique_primary_values)    
+
+        selected_metric = st.sidebar.selectbox("选择指标", metrics, index=metrics.index('TOTAL SALES'))
+
+        date_range = st.sidebar.date_input("选择日期范围", [df_cleaned['DATE'].min(), df_cleaned['DATE'].max()])
 
         grouped_df, fig = plot_sankey(df_cleaned, 
                         selected_primary=selected_primary,
@@ -561,3 +555,163 @@ if selected_page == "广告活动与SKU各指标流向":
         st.write(grouped_df)
     else:
         st.warning("请检查文件格式是否正确")
+
+if selected_page == "广告效果评分":
+    if not st.session_state["uploaded_campaign_summary"].empty:
+        df = st.session_state["uploaded_campaign_summary"]
+
+        # 日期范围选择
+        st.sidebar.subheader("选择统计周期")
+        min_date, max_date = df["DATE"].min(), df["DATE"].max()
+        date_range = st.sidebar.date_input(
+            "选择日期范围:",
+            value=[min_date, max_date],
+            min_value=min_date,
+            max_value=max_date,
+        )
+        # 如果用户未选择结束日期，自动设置为最大日期
+        if len(date_range) == 1:
+            start_date = date_range[0]
+            end_date = max_date
+        else:
+            start_date, end_date = date_range
+        df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
+
+        # Streamlit Sidebar
+        st.sidebar.header("选择分析维度和权重")
+
+        # 选择统计轴
+        axis_option = st.sidebar.selectbox("统计轴", options=["CAMPAIGN ID", "PROMOTED SKU"])
+
+        # 使用 slider 设置权重为整数
+        w1 = st.sidebar.slider("TOTAL SALES 权重 (w1)", 0, 100, 33, step=1)
+        w2 = st.sidebar.slider("ROAS 权重 (w2)", 0, 100, 33, step=1)
+        w3 = st.sidebar.slider("SPEND 权重 (w3)", 0, 100, step=1)
+
+        # 确保总权重为 100%
+        total_weight = w1 + w2 + w3
+        if total_weight != 100:
+            st.sidebar.warning(f"权重总和必须为 100。当前总和为 {total_weight}")
+        else:
+            # 将权重转换为比例
+            w1 /= 100
+            w2 /= 100
+            w3 /= 100
+
+            # 数据聚合
+            grouped = df.groupby(axis_option).agg(
+                TOTAL_SALES=("TOTAL SALES", "sum"),
+                SPEND=("SPEND", "sum"),
+                ROAS=("ROAS", "mean"),
+            ).reset_index()
+
+            # 数据归一化
+            grouped["TOTAL_SALES_NORM"] = (grouped["TOTAL_SALES"] - grouped["TOTAL_SALES"].min()) / \
+                                        (grouped["TOTAL_SALES"].max() - grouped["TOTAL_SALES"].min())
+            grouped["ROAS_NORM"] = (grouped["ROAS"] - grouped["ROAS"].min()) / \
+                                (grouped["ROAS"].max() - grouped["ROAS"].min())
+            grouped["SPEND_NORM"] = (grouped["SPEND"] - grouped["SPEND"].min()) / \
+                                    (grouped["SPEND"].max() - grouped["SPEND"].min())
+
+            # 百分比加权评分
+            grouped["Score"] = (
+                w1 * grouped["TOTAL_SALES_NORM"] +
+                w2 * grouped["ROAS_NORM"] -
+                w3 * grouped["SPEND_NORM"]
+            )
+
+            # 动态显示结果
+            st.write(f"按 {axis_option} 汇总的结果")
+            if axis_option == "CAMPAIGN ID":
+                st.dataframe(grouped[["CAMPAIGN ID", "TOTAL_SALES", "SPEND", "ROAS", "Score"]])
+            elif axis_option == "PROMOTED SKU":
+                st.dataframe(grouped[["PROMOTED SKU", "TOTAL_SALES", "SPEND", "ROAS", "Score"]])
+
+if selected_page == "PLA vs Banner":
+    if not st.session_state["uploaded_campaign_summary"].empty:
+        df = st.session_state["uploaded_campaign_summary"]
+
+        # 日期范围选择
+        st.sidebar.subheader("选择统计周期")
+        min_date, max_date = df["DATE"].min(), df["DATE"].max()
+        date_range = st.sidebar.date_input(
+            "选择日期范围:",
+            value=[min_date, max_date],
+            min_value=min_date,
+            max_value=max_date,
+        )
+        # 如果用户未选择结束日期，自动设置为最大日期
+        if len(date_range) == 1:
+            start_date = date_range[0]
+            end_date = max_date
+        else:
+            start_date, end_date = date_range
+
+        df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
+
+        chart_type = st.sidebar.radio(
+            "选择图表类型：",
+            options=["百分比饼图", "折线图"]
+        )
+        # 聚合操作
+        aggregations = {
+            'IMPRESSIONS': 'sum',
+            'CLICKS': 'sum',
+            'SPEND': 'sum',
+            'CPC': 'sum',
+            'CPM': 'sum',
+            'CTR': 'mean',
+            'TOTAL SALES': 'sum',
+            'ROAS': 'mean',
+        }
+
+        # 百分比饼图逻辑
+        if chart_type == "百分比饼图":
+            # 按 PLACEMENT TYPE 聚合
+            grouped = df.groupby('PLACEMENT TYPE').agg(aggregations).reset_index()
+            total = grouped.iloc[:, 1:].sum(axis=0)
+            percent_df = grouped.copy()
+            for col in grouped.columns[1:]:
+                percent_df[col] = grouped[col] / total[col] * 100
+
+            st.title("广告类型百分比饼图")
+            columns = list(grouped.columns[1:])
+
+            # 每行展示两张图
+            for i in range(0, len(columns), 2):
+                cols = st.columns(2)
+                for j in range(2):
+                    if i + j < len(columns):
+                        col_name = columns[i + j]
+                        fig = px.pie(
+                            percent_df,
+                            names='PLACEMENT TYPE',
+                            values=col_name,
+                            title=f'{col_name} 百分比分布',
+                            hole=0.4
+                        )
+                        cols[j].plotly_chart(fig, use_container_width=True)
+
+        # 折线图逻辑
+        elif chart_type == "折线图":
+            # 按 DATE 和 PLACEMENT TYPE 聚合
+            date_grouped = df.groupby(['DATE', 'PLACEMENT TYPE']).agg(aggregations).reset_index()
+
+            st.title("参数时间折线图")
+            columns = list(aggregations.keys())
+
+            # 每行展示两张图
+            for i in range(0, len(columns), 2):
+                cols = st.columns(2)
+                for j in range(2):
+                    if i + j < len(columns):
+                        col_name = columns[i + j]
+                        fig = px.line(
+                            date_grouped,
+                            x='DATE',
+                            y=col_name,
+                            color='PLACEMENT TYPE',
+                            title=f'{col_name} 日期趋势',
+                            markers=True
+                        )
+                        cols[j].plotly_chart(fig, use_container_width=True)
